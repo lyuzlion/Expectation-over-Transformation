@@ -5,11 +5,6 @@ import torchvision.transforms as T
 import PIL
 import numpy as np
 from utils.show_classify import *
-import tempfile
-from urllib.request import urlretrieve
-import tarfile
-import os
-
 import json
 import matplotlib.pyplot as plt
 
@@ -27,48 +22,54 @@ img = (np.asarray(img) / 255.0).astype(np.float32) # 归一化为0-1之间的数
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 model = models.inception_v3(weights=models.Inception_V3_Weights.IMAGENET1K_V1).to(device)
-
 model.eval()
 
 demo_epsilon = 2.0/255.0 # a really small perturbation
 demo_lr = 1e-1
-demo_steps = 10
+demo_steps = 15
 demo_target = [924] # "guacamole"
 
-# PGD step size
 alpha = 2/255
-# Radius of allowable perturbations
 epsilon = 8/255
 
 X = torch.tensor(np.expand_dims(img.transpose((2,0,1)), axis=0)).to(device) # (3, xxx, xxx)
 X_adv = X.clone().detach().to(device)
 criterion = nn.CrossEntropyLoss().to(device)
 
-for i in range(demo_steps):
-    
-    # 1. Calculate gradient
-    X_adv.requires_grad = True
-    
-    # print(model(X_adv).shape)
-    # print( torch.tensor(demo_target).shape)
-    
-    pred = model(X_adv) # torch.Size([1, 1000])
 
-    # print(demo_target)
-    # print(torch.tensor(demo_target))
+for i in range(demo_steps):
+    X_adv.requires_grad = True
+    average_loss = 0
+    pred = model(T.functional.rotate(X_adv, angle=(torch.rand(1) * 40 - 20).item())) # torch.Size([1, 1000])
     loss = criterion(pred, torch.tensor(demo_target).to(device))
     loss.backward() 
-    
-    X_adv.data = X_adv - alpha*torch.sign(X_adv.grad)
-    
+    X_adv.data = X_adv - alpha * torch.sign(X_adv.grad)
     X_adv.data = torch.min(X_adv, X+epsilon)
     X_adv.data = torch.max(X_adv, X-epsilon)
-    
     X_adv.data = torch.clamp(X_adv, min=0, max=1)
     if i % 4 == 0: 
         print( f'[Iteration {i}] Loss: {loss.item()}' )
 
-x_adv_star = X_adv[0].cpu().detach().numpy().transpose((1,2,0))
-show_classify(model.to("cpu"), x_adv_star, imagenet_labels, correct_class=img_class, target_class=demo_target)
+x_adv_star = X_adv[0]
+
+plt.imshow(x_adv_star.cpu().detach().numpy().transpose(1, 2, 0))
+plt.show()
+rotated = T.functional.rotate(x_adv_star, angle=(torch.rand(1) * 40 - 20).item())
+
+
+plt.imshow(rotated.cpu().detach().numpy().transpose(1, 2, 0))
+plt.show()
+
+pix_diff = np.abs(X_adv[0].cpu().detach().numpy() - X[0].cpu().detach().numpy()).transpose(1, 2, 0)
+pix_diff *= 1 / np.max(pix_diff)
+plt.imshow(pix_diff); 
+plt.colorbar()
+plt.show()
+
+print(rotated.shape)
+# im_rotate = rotated.cpu().detach().numpy()[0].transpose((1,2,0)) # (299,299,3)
+# print(im_rotate.shape)
+# show_classify(model.cpu(), X[0].cpu().detach().numpy().transpose((1,2,0)), imagenet_labels, correct_class=img_class, target_class=demo_target)
+show_classify(model.cpu(), rotated.cpu().detach().numpy().transpose(1, 2, 0), imagenet_labels, correct_class=img_class, target_class=demo_target)
+
